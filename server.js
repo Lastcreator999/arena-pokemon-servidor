@@ -18,6 +18,7 @@ const cacheMovimientos = {};
 
 const FALLBACK = {
   nombre: "Placaje",
+  nombreEn: "Tackle",
   poder: 40,
   precision: 100,
   tipo: "normal",
@@ -88,6 +89,7 @@ async function obtenerMovimientos(id) {
     .slice(0, 4)
     .map((m) => ({
       nombre: m.names.find((n) => n.language.name === "es")?.name ?? m.name,
+      nombreEn: m.names.find((n) => n.language.name === "en")?.name ?? m.name,
       poder: m.power,
       precision: m.accuracy ?? 100,
       tipo: m.type.name,
@@ -355,8 +357,9 @@ function publico(l, conMovs) {
 
 function resolverTurno(s) {
   const [idA, idB] = s.orden;
-  const lA = s.jugadores[idA].equipo[s.ronda - 1];
-  const lB = s.jugadores[idB].equipo[s.ronda - 1];
+  // Cada jugador tiene su propio Pokémon activo: solo cambia el que cae
+  const lA = s.jugadores[idA].equipo[s.activo[idA]];
+  const lB = s.jugadores[idB].equipo[s.activo[idB]];
   const mA = lA.movimientos[s.acciones[idA]] || lA.movimientos[0];
   const mB = lB.movimientos[s.acciones[idB]] || lB.movimientos[0];
 
@@ -380,6 +383,7 @@ function resolverTurno(s) {
       quien: id,
       nombre: att.nombre,
       mov: mov.nombre,
+      movEn: mov.nombreEn,
       tipo: mov.tipo,
     });
 
@@ -405,17 +409,21 @@ function resolverTurno(s) {
   }
 
   if (lA.hp <= 0 || lB.hp <= 0) {
-    const ganadorId = lA.hp <= 0 ? idB : idA;
-    s.puntos[ganadorId]++;
+    const caidoId = lA.hp <= 0 ? idA : idB;
+    const ganadorId = caidoId === idA ? idB : idA;
+    s.puntos[ganadorId]++; // puntos = Pokémon rivales derrotados
+    s.activo[caidoId]++; // solo el Pokémon que cayó es reemplazado
     eventos.push({
       t: "finRonda",
       ganador: ganadorId,
+      perdedor: caidoId,
       puntos: { ...s.puntos },
     });
 
-    if (s.puntos[idA] === 2 || s.puntos[idB] === 2 || s.ronda === 3) {
+    if (s.puntos[ganadorId] === 3) {
+      // el equipo del rival se quedó sin Pokémon
       s.estado = "fin";
-      s.ganador = s.puntos[idA] > s.puntos[idB] ? idA : idB;
+      s.ganador = ganadorId;
       eventos.push({ t: "finJuego", ganador: s.ganador });
     } else {
       s.ronda++;
@@ -449,6 +457,7 @@ app.post("/api/online/crear", (req, res) => {
       },
     },
     ronda: 1,
+    activo: { [jugadorId]: 0 }, // índice del Pokémon en combate de cada jugador
     turno: 0,
     acciones: {},
     turnos: [],
@@ -480,6 +489,7 @@ app.post("/api/online/unirse", (req, res) => {
       ping: Date.now(),
     };
     s.puntos[jugadorId] = 0;
+    s.activo[jugadorId] = 0;
     s.estado = "eligiendo";
   }
   res.json({ exito: true, codigo: s.codigo, escenario: s.escenario });
@@ -609,7 +619,7 @@ app.post("/api/online/:codigo/accion", (req, res) => {
   j.ping = Date.now();
 
   const idx = Number(mov);
-  const luchador = j.equipo[s.ronda - 1];
+  const luchador = j.equipo[s.activo[jugadorId]];
   if (!Number.isInteger(idx) || idx < 0 || idx >= luchador.movimientos.length) {
     return res.status(400).json({ error: "Movimiento inválido." });
   }
