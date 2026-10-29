@@ -7,7 +7,6 @@ const POKEAPI = "https://pokeapi.co/api/v2";
 
 app.use(express.json());
 app.use(cors());
-// Express 5: req.body puede venir undefined si no hay cuerpo
 app.use((req, res, next) => {
   if (req.body === undefined) req.body = {};
   next();
@@ -29,7 +28,6 @@ app.get("/", (req, res) => {
   res.json({ mensaje: "Servidor de Pokémon Arena funcionando correctamente." });
 });
 
-// ==================== Helpers PokéAPI ====================
 async function obtenerPokemon(id) {
   if (cachePokemon[id]) return cachePokemon[id];
 
@@ -136,7 +134,6 @@ async function precalentar() {
   console.log("Caché de Pokémon lista");
 }
 
-// ==================== Endpoints VS PC ====================
 app.get("/api/arena/pool", async (req, res) => {
   try {
     const pool = await generarPool(10, [], req.query.legendarios === "true");
@@ -176,9 +173,6 @@ app.get("/api/arena/pokemon/:id/movimientos", async (req, res) => {
     res.json({ exito: true, movimientos: [FALLBACK] });
   }
 });
-
-// ==================== MODO ONLINE ====================
-// El servidor es el árbitro: calcula cada turno y los dos celulares lo reproducen.
 
 const TABLA = {
   normal: { x05: ["rock", "steel"], x0: ["ghost"] },
@@ -252,9 +246,8 @@ const BONUS = {
   bosque: ["grass", "bug"],
 };
 
-// Multiplicadores de tipo (iguales a los de battle-page.ts)
-const MULT_SUPER = 2.5; // ventaja de tipo
-const MULT_POCO = 0.4; // desventaja de tipo
+const MULT_SUPER = 2.5;
+const MULT_POCO = 0.4;
 
 function efectividad(tipoMov, tiposDef) {
   const fila = TABLA[tipoMov];
@@ -337,7 +330,6 @@ function salaDe(codigo) {
   return s;
 }
 
-// Cola por sala: evita que los dos jugadores reciban Pokémon repetidos
 function enCola(s, fn) {
   const p = (s.cola || Promise.resolve()).then(fn);
   s.cola = p.catch(() => {});
@@ -357,7 +349,6 @@ function publico(l, conMovs) {
 
 function resolverTurno(s) {
   const [idA, idB] = s.orden;
-  // Cada jugador tiene su propio Pokémon activo: solo cambia el que cae
   const lA = s.jugadores[idA].equipo[s.activo[idA]];
   const lB = s.jugadores[idB].equipo[s.activo[idB]];
   const mA = lA.movimientos[s.acciones[idA]] || lA.movimientos[0];
@@ -411,8 +402,8 @@ function resolverTurno(s) {
   if (lA.hp <= 0 || lB.hp <= 0) {
     const caidoId = lA.hp <= 0 ? idA : idB;
     const ganadorId = caidoId === idA ? idB : idA;
-    s.puntos[ganadorId]++; // puntos = Pokémon rivales derrotados
-    s.activo[caidoId]++; // solo el Pokémon que cayó es reemplazado
+    s.puntos[ganadorId]++;
+    s.activo[caidoId]++;
     eventos.push({
       t: "finRonda",
       ganador: ganadorId,
@@ -421,7 +412,6 @@ function resolverTurno(s) {
     });
 
     if (s.puntos[ganadorId] === 3) {
-      // el equipo del rival se quedó sin Pokémon
       s.estado = "fin";
       s.ganador = ganadorId;
       eventos.push({ t: "finJuego", ganador: s.ganador });
@@ -435,7 +425,6 @@ function resolverTurno(s) {
   s.acciones = {};
 }
 
-// Crear sala
 app.post("/api/online/crear", (req, res) => {
   const { jugadorId, escenario, nombre } = req.body;
   if (!jugadorId) return res.status(400).json({ error: "Falta el jugador." });
@@ -445,7 +434,7 @@ app.post("/api/online/crear", (req, res) => {
   salas[codigo] = {
     codigo,
     escenario: esc,
-    estado: "esperando", // esperando -> eligiendo -> batalla -> fin
+    estado: "esperando",
     orden: [jugadorId],
     jugadores: {
       [jugadorId]: {
@@ -457,7 +446,7 @@ app.post("/api/online/crear", (req, res) => {
       },
     },
     ronda: 1,
-    activo: { [jugadorId]: 0 }, // índice del Pokémon en combate de cada jugador
+    activo: { [jugadorId]: 0 },
     turno: 0,
     acciones: {},
     turnos: [],
@@ -469,7 +458,6 @@ app.post("/api/online/crear", (req, res) => {
   res.json({ exito: true, codigo, escenario: esc });
 });
 
-// Unirse a sala
 app.post("/api/online/unirse", (req, res) => {
   const { codigo, jugadorId, nombre } = req.body;
   const s = salaDe(codigo);
@@ -495,7 +483,6 @@ app.post("/api/online/unirse", (req, res) => {
   res.json({ exito: true, codigo: s.codigo, escenario: s.escenario });
 });
 
-// Pool de 10 propio (sin repetir los del rival)
 app.get("/api/online/:codigo/pool", async (req, res) => {
   const s = salaDe(req.params.codigo);
   if (!s)
@@ -519,7 +506,6 @@ app.get("/api/online/:codigo/pool", async (req, res) => {
   }
 });
 
-// Enviar equipo (3 ids del pool)
 app.post("/api/online/:codigo/equipo", async (req, res) => {
   const s = salaDe(req.params.codigo);
   if (!s)
@@ -558,7 +544,6 @@ app.post("/api/online/:codigo/equipo", async (req, res) => {
   }
 });
 
-// Estado de la sala (el celular lo consulta cada ~1.2 s)
 app.get("/api/online/:codigo/estado", (req, res) => {
   const s = salaDe(req.params.codigo);
   if (!s)
@@ -585,7 +570,7 @@ app.get("/api/online/:codigo/estado", (req, res) => {
     ganador: s.ganador,
     abandono: s.abandono,
     rivalDesconectado:
-      r && s.estado === "batalla" ? Date.now() - r.ping > 20000 : false,
+      r && s.estado === "batalla" ? Date.now() - r.ping > 25000 : false,
     turnos: s.turnos.filter((t) => t.n >= desde),
   };
 
@@ -601,7 +586,6 @@ app.get("/api/online/:codigo/estado", (req, res) => {
   res.json(out);
 });
 
-// Elegir movimiento del turno
 app.post("/api/online/:codigo/accion", (req, res) => {
   const s = salaDe(req.params.codigo);
   if (!s)
@@ -611,13 +595,12 @@ app.post("/api/online/:codigo/accion", (req, res) => {
   if (!j) return res.status(403).json({ error: "No perteneces a esta sala." });
   if (s.estado !== "batalla")
     return res.status(409).json({ error: "La batalla no está activa." });
-  if (ronda !== s.ronda || turno !== s.turno) {
-    return res
-      .status(409)
-      .json({ error: "Turno desfasado, vuelve a intentar." });
-  }
-  j.ping = Date.now();
 
+  if (ronda !== s.ronda || turno > s.turno) {
+    return res.status(409).json({ error: "Turno desfasado, sincronizando..." });
+  }
+
+  j.ping = Date.now();
   const idx = Number(mov);
   const luchador = j.equipo[s.activo[jugadorId]];
   if (!Number.isInteger(idx) || idx < 0 || idx >= luchador.movimientos.length) {
@@ -629,7 +612,6 @@ app.post("/api/online/:codigo/accion", (req, res) => {
   res.json({ exito: true });
 });
 
-// Rendirse / abandonar
 app.post("/api/online/:codigo/abandonar", (req, res) => {
   const s = salaDe(req.params.codigo);
   if (!s) return res.json({ exito: true });
@@ -642,7 +624,6 @@ app.post("/api/online/:codigo/abandonar", (req, res) => {
   res.json({ exito: true });
 });
 
-// Limpieza de salas viejas (más de 3 horas sin actividad)
 setInterval(
   () => {
     const limite = Date.now() - 3 * 60 * 60 * 1000;
@@ -655,4 +636,5 @@ setInterval(
 
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`Servidor corriendo en http://localhost:${PORT}`);
+  precalentar();
 });
