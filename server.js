@@ -357,27 +357,50 @@ function publico(l, conMovs) {
   };
 }
 
+// Índice del primer Pokémon que sigue en pie (reemplazo automático al desmayarse)
+function primerVivo(equipo) {
+  const i = equipo.findIndex((l) => l.hp > 0);
+  return i < 0 ? 0 : i;
+}
+
 function resolverTurno(s) {
   const [idA, idB] = s.orden;
-  // Cada jugador tiene su propio Pokémon activo: solo cambia el que cae
+  const eventos = [];
+
+  // 1) Los cambios de Pokémon ocurren primero y gastan el turno de quien cambia
+  for (const id of [idA, idB]) {
+    const ac = s.acciones[id];
+    if (ac && ac.cambio !== undefined) {
+      s.activo[id] = ac.cambio;
+      eventos.push({
+        t: "cambio",
+        quien: id,
+        idx: ac.cambio,
+        nombre: s.jugadores[id].equipo[ac.cambio].nombre,
+      });
+    }
+  }
+
+  // Cada jugador tiene su propio Pokémon activo: solo cambia el que cae o el que se cambia
   const lA = s.jugadores[idA].equipo[s.activo[idA]];
   const lB = s.jugadores[idB].equipo[s.activo[idB]];
-  const mA = lA.movimientos[s.acciones[idA]] || lA.movimientos[0];
-  const mB = lB.movimientos[s.acciones[idB]] || lB.movimientos[0];
 
-  const aPrimero =
-    lA.vel > lB.vel || (lA.vel === lB.vel && Math.random() < 0.5);
-  const orden = aPrimero
-    ? [
-        [idA, idB, lA, lB, mA],
-        [idB, idA, lB, lA, mB],
-      ]
-    : [
-        [idB, idA, lB, lA, mB],
-        [idA, idB, lA, lB, mA],
-      ];
+  // 2) Solo atacan quienes eligieron un movimiento (el que se cambió no ataca)
+  const orden = [];
+  for (const [id, idDef, att, def] of [
+    [idA, idB, lA, lB],
+    [idB, idA, lB, lA],
+  ]) {
+    const ac = s.acciones[id];
+    if (!ac || ac.mov === undefined) continue;
+    orden.push([id, idDef, att, def, att.movimientos[ac.mov] || att.movimientos[0]]);
+  }
+  if (orden.length === 2) {
+    const aPrimero =
+      lA.vel > lB.vel || (lA.vel === lB.vel && Math.random() < 0.5);
+    if (!aPrimero) orden.reverse();
+  }
 
-  const eventos = [];
   for (const [id, idDef, att, def, mov] of orden) {
     if (att.hp <= 0) continue;
     eventos.push({
@@ -414,7 +437,8 @@ function resolverTurno(s) {
     const caidoId = lA.hp <= 0 ? idA : idB;
     const ganadorId = caidoId === idA ? idB : idA;
     s.puntos[ganadorId]++; // puntos = Pokémon rivales derrotados
-    s.activo[caidoId]++; // solo el Pokémon que cayó es reemplazado
+    // solo el Pokémon que cayó es reemplazado (por el primero que siga vivo)
+    s.activo[caidoId] = primerVivo(s.jugadores[caidoId].equipo);
     eventos.push({
       t: "finRonda",
       ganador: ganadorId,
@@ -422,7 +446,7 @@ function resolverTurno(s) {
       puntos: { ...s.puntos },
     });
 
-    if (s.puntos[ganadorId] === 3) {
+    if (s.puntos[ganadorId] === 2) {
       // el equipo del rival se quedó sin Pokémon
       s.estado = "fin";
       s.ganador = ganadorId;
@@ -620,13 +644,34 @@ app.post("/api/online/:codigo/accion", (req, res) => {
   }
   j.ping = Date.now();
 
+  // mov 0-3 = atacar con ese movimiento; mov 10-12 = cambiar al Pokémon (mov - 10)
   const idx = Number(mov);
-  const luchador = j.equipo[s.activo[jugadorId]];
-  if (!Number.isInteger(idx) || idx < 0 || idx >= luchador.movimientos.length) {
-    return res.status(400).json({ error: "Movimiento inválido." });
+  let accion;
+  if (Number.isInteger(idx) && idx >= 10) {
+    const dest = idx - 10;
+    const eq = j.equipo;
+    if (
+      dest < 0 ||
+      dest >= eq.length ||
+      dest === s.activo[jugadorId] ||
+      eq[dest].hp <= 0
+    ) {
+      return res.status(400).json({ error: "Cambio inválido." });
+    }
+    accion = { cambio: dest };
+  } else {
+    const luchador = j.equipo[s.activo[jugadorId]];
+    if (
+      !Number.isInteger(idx) ||
+      idx < 0 ||
+      idx >= luchador.movimientos.length
+    ) {
+      return res.status(400).json({ error: "Movimiento inválido." });
+    }
+    accion = { mov: idx };
   }
 
-  if (s.acciones[jugadorId] === undefined) s.acciones[jugadorId] = idx;
+  if (s.acciones[jugadorId] === undefined) s.acciones[jugadorId] = accion;
   if (s.orden.every((id) => s.acciones[id] !== undefined)) resolverTurno(s);
   res.json({ exito: true });
 });
